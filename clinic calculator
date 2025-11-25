@@ -1,0 +1,233 @@
+import tkinter as tk
+from tkinter import messagebox, simpledialog
+import os
+from collections import defaultdict
+
+PASS_FILE = "admin_pass.txt"
+DEFAULT_PASS = "admin123"
+
+
+CPT_MAP = {
+    "99204": ["Initial visit", 200],
+    "99214": ["Follow up visit", 150],
+    "43239": ["EGD", 500],
+    "45380": ["Colonoscopy", 600],
+    "46221": ["Hemorrhoid banding", 350]
+}
+
+admin_logged_in = False
+price_entries = {}
+
+
+def load_admin_password():
+    if not os.path.exists(PASS_FILE):
+        with open(PASS_FILE, 'w') as f:
+            f.write(DEFAULT_PASS)
+    with open(PASS_FILE, 'r') as f:
+        return f.read().strip()
+
+def save_admin_password(new_password):
+    with open(PASS_FILE, 'w') as f:
+        f.write(new_password)
+
+
+def login_admin():
+    global admin_logged_in
+    pwd = simpledialog.askstring("Admin Login", "Enter admin password:", show="*")
+    if pwd == load_admin_password():
+        admin_logged_in = True
+        messagebox.showinfo("Login", "Admin login successful.")
+        update_price_editability()
+        admin_button.config(text="Logout Admin", command=logout_admin)
+    else:
+        messagebox.showerror("Error", "Incorrect password.")
+
+
+def logout_admin():
+    global admin_logged_in
+    admin_logged_in = False
+    update_price_editability()
+    admin_button.config(text="Admin Login", command=login_admin)
+    messagebox.showinfo("Logout", "Admin logged out.")
+
+
+def reset_password():
+    global admin_logged_in
+    if not admin_logged_in:
+        messagebox.showerror("Permission Denied", "Only admin can reset the password.")
+        return
+    new_pwd = simpledialog.askstring("Reset Password", "Enter new password:", show="*")
+    if new_pwd:
+        save_admin_password(new_pwd)
+        messagebox.showinfo("Password Reset", "Password updated successfully.")
+
+
+def update_price_editability():
+    for code, (label, entry) in price_entries.items():
+        if admin_logged_in:
+            entry.config(state="normal")
+        else:
+            entry.config(state="readonly")
+
+
+def calculate():
+    try:
+        coinsurance_percent = float(entry_coinsurance.get()) / 100.0
+        remaining_deductible = float(entry_deductible.get())
+        balance_due = float(entry_balance.get())
+        copay_amt = float(entry_copay_amt.get())
+        _ = float(entry_ded_amt.get())
+
+        result_text.delete(1.0, tk.END)
+        grand_total = 0
+        today_total = 0
+        service_summary = defaultdict(float)
+
+        for code in CPT_MAP:
+            name = CPT_MAP[code][0]
+            charge = float(price_entries[code][1].get())
+            CPT_MAP[code][1] = charge
+
+        for row in service_rows:
+            code = row[0]
+            name, charge = CPT_MAP[code]
+
+            use_deductible = row[1].get()
+            use_coinsurance = row[2].get()
+            use_copay = row[3].get()
+            today_checked = row[4].get()
+
+            total_due = 0
+
+            if use_deductible:
+                if remaining_deductible >= charge:
+                    total_due = charge
+                    remaining_deductible -= charge
+                else:
+                    delta = charge - remaining_deductible
+                    remaining_deductible = 0
+                    if use_coinsurance:
+                        total_due = delta * coinsurance_percent
+                    else:
+                        total_due = delta
+            else:
+                if remaining_deductible == 0:
+                    if use_coinsurance:
+                        total_due = charge * coinsurance_percent
+                    elif use_copay:
+                        total_due = copay_amt
+                    else:
+                        total_due = 0
+                else:
+                    if not use_coinsurance:
+                        total_due = charge - remaining_deductible
+                        if total_due < 0:
+                            total_due = 0
+
+            total_due += balance_due
+            grand_total += total_due
+            if today_checked:
+                today_total += total_due
+            service_summary[name] += total_due
+
+            result_text.insert(tk.END, f"{name} ({code}): Total Due = ${total_due:.2f}\n")
+
+        result_text.insert(tk.END, "\nSummary:\n")
+        for name, total in service_summary.items():
+            result_text.insert(tk.END, f"{name}: ${total:.2f}\n")
+
+        result_text.insert(tk.END, f"\nGrand Total Due: ${grand_total:.2f}\n")
+        result_text.insert(tk.END, f"Today’s Visit Total: ${today_total:.2f}\n")
+
+    except ValueError:
+        messagebox.showerror("Input error", "Please enter valid numbers.")
+
+# ===== Tkinter UI 构建 =====
+
+root = tk.Tk()
+root.title("Medical Billing Calculator with Admin Control")
+
+
+frame_top = tk.Frame(root)
+frame_top.pack(pady=10)
+
+tk.Label(frame_top, text="Coinsurance %:").grid(row=0, column=0)
+entry_coinsurance = tk.Entry(frame_top, width=5)
+entry_coinsurance.grid(row=0, column=1)
+entry_coinsurance.insert(0, "10")
+
+tk.Label(frame_top, text="Remaining Deductible:").grid(row=0, column=2)
+entry_deductible = tk.Entry(frame_top, width=5)
+entry_deductible.grid(row=0, column=3)
+entry_deductible.insert(0, "0")
+
+tk.Label(frame_top, text="Balance:").grid(row=0, column=4)
+entry_balance = tk.Entry(frame_top, width=5)
+entry_balance.grid(row=0, column=5)
+entry_balance.insert(0, "0")
+
+tk.Label(frame_top, text="Deductible Amount:").grid(row=0, column=6)
+entry_ded_amt = tk.Entry(frame_top, width=5)
+entry_ded_amt.grid(row=0, column=7)
+entry_ded_amt.insert(0, "2500")
+
+tk.Label(frame_top, text="Copay Amount:").grid(row=0, column=8)
+entry_copay_amt = tk.Entry(frame_top, width=5)
+entry_copay_amt.grid(row=0, column=9)
+entry_copay_amt.insert(0, "20")
+
+
+frame_admin = tk.Frame(root)
+frame_admin.pack(pady=5)
+
+admin_button = tk.Button(frame_admin, text="Admin Login", command=login_admin)
+admin_button.pack(side="left", padx=10)
+
+tk.Button(frame_admin, text="Reset Password", command=reset_password).pack(side="left", padx=10)
+
+
+frame_middle = tk.Frame(root)
+frame_middle.pack()
+
+headers = ["Service", "Price", "Deductible", "Coinsurance", "Copay", "Today"]
+for i, h in enumerate(headers):
+    tk.Label(frame_middle, text=h, font=('Arial', 10, 'bold')).grid(row=0, column=i, padx=5)
+
+service_rows = []
+codes = list(CPT_MAP.keys())
+
+for i, code in enumerate(codes):
+    name, price = CPT_MAP[code]
+
+    tk.Label(frame_middle, text=f"{name} ({code})").grid(row=i+1, column=0)
+
+    price_var = tk.StringVar(value=str(price))
+    price_entry = tk.Entry(frame_middle, textvariable=price_var, width=8, state='readonly')
+    price_entry.grid(row=i+1, column=1)
+
+    deductible_var = tk.IntVar()
+    coinsurance_var = tk.IntVar()
+    copay_var = tk.IntVar()
+    today_var = tk.IntVar()
+
+    tk.Checkbutton(frame_middle, variable=deductible_var).grid(row=i+1, column=2)
+    tk.Checkbutton(frame_middle, variable=coinsurance_var).grid(row=i+1, column=3)
+    tk.Checkbutton(frame_middle, variable=copay_var).grid(row=i+1, column=4)
+    tk.Checkbutton(frame_middle, variable=today_var).grid(row=i+1, column=5)
+
+    price_entries[code] = (tk.Label(frame_middle, text=f"{name}"), price_entry)
+    service_rows.append((code, deductible_var, coinsurance_var, copay_var, today_var))
+
+
+frame_bottom = tk.Frame(root)
+frame_bottom.pack(pady=10)
+
+tk.Button(frame_bottom, text="Calculate", command=calculate).pack()
+
+result_text = tk.Text(root, height=15, width=90)
+result_text.pack(pady=10)
+
+
+update_price_editability()
+
+root.mainloop()
